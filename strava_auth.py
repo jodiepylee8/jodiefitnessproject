@@ -89,6 +89,7 @@ def get_activities(limit=50):
         data.append({
             'name': activity.name,
             'type': activity.type if activity.type else None,
+            'elapsed_time': activity.elapsed_time if activity.elapsed_time else None,
             'distance_km': activity.distance / 1000 if activity.distance else None,
             'average_HR': activity.average_heartrate if activity.average_heartrate else None,
             'average_speed_kmh': avg_speed_kmh,
@@ -116,8 +117,46 @@ def main():
     df['start_date'] = pd.to_datetime(df['start_date'])
     print(df[['name', 'distance_km', 'average_HR','average_pace_min_per_km','average_pace_mmss']].head(10))
 
+    df['date'] = pd.to_datetime(df['start_date']).dt.date
+
+    # --- STEP 1: Create a training load metric  ---
+    if 'suffer_score' in df.columns:
+        df['training_load'] = df['suffer_score']
+    else:
+        df['training_load'] = (df['distance_km']*100) + (df['elapsed_time'] / 60)
+
+    # --- STEP 2: Group by day ---
+    daily_load = df.groupby('date')['training_load'].sum().reset_index()
+
+    # --- STEP 3: Group by day ---
+    daily_load = df.groupby('date')['training_load'].sum().reset_index()
+
+    # --- STEP 4: Create full year date range ---
+    start_date = pd.to_datetime(daily_load['date'].min())
+    end_date = pd.to_datetime('today')
+
+    all_dates = pd.DataFrame({'date': pd.date_range(start_date, end_date)})
+
+    all_dates['date'] = pd.to_datetime(all_dates['date']).dt.date
+    daily_load['date'] = pd.to_datetime(daily_load['date']).dt.date
+
+    calendar_df = pd.merge(all_dates, daily_load, on='date', how='left').fillna(0)
+    calendar_df['date'] = pd.to_datetime(calendar_df['date'])
+
+    # --- STEP 5: Pivot for heatmap (Calendar Style) ---
+    calendar_df['year'] = calendar_df['date'].dt.year
+    calendar_df['month'] = calendar_df['date'].dt.month
+    calendar_df['day'] = calendar_df['date'].dt.day
+    calendar_df['weekday'] = calendar_df['date'].dt.weekday
+    calendar_df['week'] = calendar_df['date'].dt.isocalendar().week
+
+    heatmap_data = calendar_df.pivot_table(index='weekday',
+                                       columns='week',
+                                       values='training_load',
+                                       aggfunc='sum')
+
     # ---------------------------
-    # Plot pace over time
+    # Plot pace and HR over time
     # ---------------------------
     fig, ax1 = plt.subplots(figsize=(10,5))
 
@@ -142,6 +181,17 @@ def main():
     lines = [line1, line2]
     labels = [line.get_label() for line in lines]
     ax1.legend(lines, labels, loc='upper left')
+
+    plt.figure(figsize=(10, 5))
+    sns.heatmap(heatmap_data,
+            cmap='YlOrRd',
+            linewidths=0.5,
+            linecolor='gray',
+            cbar_kws={'label': 'Training Load (Intensity & Frequency)'})
+    
+    plt.title("Training Intensity Heatmap - Past Year")
+    plt.ylabel("Day of Week (0=Mon)")
+    plt.xlabel("Week Number")
 
     plt.show()
 
